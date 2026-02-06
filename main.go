@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+var logWriter io.Writer = os.Stdout
+
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -45,6 +47,9 @@ func main() {
 }
 
 func runClient(reader *bufio.Reader) {
+	closeLog := setupLogger("client")
+	defer closeLog()
+
 	fmt.Println("选择服务端地址:")
 	fmt.Println("1) 10.41.100.54:5056")
 	fmt.Println("2) 10.170.0.96:5056")
@@ -53,7 +58,7 @@ func runClient(reader *bufio.Reader) {
 
 	choice, err := readLine(reader)
 	if err != nil {
-		fmt.Printf("输入错误: %v\n", err)
+		logPrintf("输入错误: %v\n", err)
 		return
 	}
 
@@ -67,22 +72,22 @@ func runClient(reader *bufio.Reader) {
 		fmt.Print("服务端 IP: ")
 		ip, err := readLine(reader)
 		if err != nil {
-			fmt.Printf("输入错误: %v\n", err)
+			logPrintf("输入错误: %v\n", err)
 			return
 		}
 		if ip == "" {
-			fmt.Println("IP 不能为空")
+			logPrintln("IP 不能为空")
 			return
 		}
 
 		fmt.Print("服务端端口: ")
 		port, err := readLine(reader)
 		if err != nil {
-			fmt.Printf("输入错误: %v\n", err)
+			logPrintf("输入错误: %v\n", err)
 			return
 		}
 		if port == "" {
-			fmt.Println("端口不能为空")
+			logPrintln("端口不能为空")
 			return
 		}
 		addr = net.JoinHostPort(ip, port)
@@ -90,12 +95,12 @@ func runClient(reader *bufio.Reader) {
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
+		logPrintf("连接失败: %v\n", err)
 		return
 	}
 	defer conn.Close()
 
-	fmt.Printf("已连接到 %s\n", addr)
+	logPrintf("已连接到 %s\n", addr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -105,7 +110,7 @@ func runClient(reader *bufio.Reader) {
 	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
-		fmt.Println("\n收到信号，正在关闭客户端...")
+		logPrintln("\n收到信号，正在关闭客户端...")
 		cancel()
 		_ = conn.Close()
 	}()
@@ -119,13 +124,13 @@ func runClient(reader *bufio.Reader) {
 			line, err := buf.ReadString('\n')
 			if err != nil {
 				if !errors.Is(err, net.ErrClosed) {
-					fmt.Printf("读取失败: %v\n", err)
+					logPrintf("读取失败: %v\n", err)
 				}
 				cancel()
 				return
 			}
 			count := atomic.AddUint64(&recvCount, 1)
-			fmt.Printf("接收 #%d: %s", count, line)
+			logPrintf("接收 #%d: %s", count, line)
 		}
 	}()
 
@@ -134,13 +139,13 @@ func runClient(reader *bufio.Reader) {
 		_, err := fmt.Fprintf(conn, "%s\n", msg)
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				fmt.Printf("发送失败: %v\n", err)
+				logPrintf("发送失败: %v\n", err)
 			}
 			cancel()
 			return false
 		}
 		count := atomic.AddUint64(&sendCount, 1)
-		fmt.Printf("发送 #%d: %s\n", count, msg)
+		logPrintf("发送 #%d: %s\n", count, msg)
 		return true
 	}
 
@@ -161,10 +166,13 @@ func runClient(reader *bufio.Reader) {
 }
 
 func runServer(reader *bufio.Reader) {
+	closeLog := setupLogger("server")
+	defer closeLog()
+
 	fmt.Print("监听 IP（回车默认 0.0.0.0）: ")
 	ip, err := readLine(reader)
 	if err != nil {
-		fmt.Printf("输入错误: %v\n", err)
+		logPrintf("输入错误: %v\n", err)
 		return
 	}
 	if ip == "" {
@@ -174,7 +182,7 @@ func runServer(reader *bufio.Reader) {
 	fmt.Print("监听端口（回车默认 5056）: ")
 	port, err := readLine(reader)
 	if err != nil {
-		fmt.Printf("输入错误: %v\n", err)
+		logPrintf("输入错误: %v\n", err)
 		return
 	}
 	if port == "" {
@@ -184,12 +192,12 @@ func runServer(reader *bufio.Reader) {
 	addr := net.JoinHostPort(ip, port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Printf("监听失败: %v\n", err)
+		logPrintf("监听失败: %v\n", err)
 		return
 	}
 	defer ln.Close()
 
-	fmt.Printf("正在监听 %s\n", addr)
+	logPrintf("正在监听 %s\n", addr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -199,7 +207,7 @@ func runServer(reader *bufio.Reader) {
 	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
-		fmt.Println("\n收到信号，正在关闭服务端...")
+		logPrintln("\n收到信号，正在关闭服务端...")
 		cancel()
 		_ = ln.Close()
 	}()
@@ -213,7 +221,7 @@ func runServer(reader *bufio.Reader) {
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return
 			}
-			fmt.Printf("接收连接失败: %v\n", err)
+			logPrintf("接收连接失败: %v\n", err)
 			continue
 		}
 
@@ -225,32 +233,57 @@ func handleConn(conn net.Conn, sendCount, recvCount *uint64) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
-	fmt.Printf("客户端已连接: %s\n", remote)
+	logPrintf("客户端已连接: %s\n", remote)
 
 	buf := bufio.NewReader(conn)
 	for {
 		line, err := buf.ReadString('\n')
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
-				fmt.Printf("[%s] 读取失败: %v\n", remote, err)
+				logPrintf("[%s] 读取失败: %v\n", remote, err)
 			}
-			fmt.Printf("客户端已断开: %s\n", remote)
+			logPrintf("客户端已断开: %s\n", remote)
 			return
 		}
 		recv := atomic.AddUint64(recvCount, 1)
-		fmt.Printf("[%s] 接收 #%d: %s", remote, recv, line)
+		logPrintf("[%s] 接收 #%d: %s", remote, recv, line)
 
 		msg := time.Now().Format(time.RFC3339Nano)
 		_, err = fmt.Fprintf(conn, "%s\n", msg)
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				fmt.Printf("[%s] 发送失败: %v\n", remote, err)
+				logPrintf("[%s] 发送失败: %v\n", remote, err)
 			}
 			return
 		}
 		send := atomic.AddUint64(sendCount, 1)
-		fmt.Printf("[%s] 发送 #%d: %s\n", remote, send, msg)
+		logPrintf("[%s] 发送 #%d: %s\n", remote, send, msg)
 	}
+}
+
+func setupLogger(role string) func() {
+	ts := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("tcptest-%s-%s.log", role, ts)
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "日志文件创建失败: %v\n", err)
+		logWriter = os.Stdout
+		return func() {}
+	}
+	logWriter = io.MultiWriter(os.Stdout, file)
+	logPrintf("日志文件: %s\n", filename)
+	logPrintf("启动时间: %s\n", time.Now().Format(time.RFC3339Nano))
+	return func() {
+		_ = file.Close()
+	}
+}
+
+func logPrintln(args ...interface{}) {
+	_, _ = fmt.Fprintln(logWriter, args...)
+}
+
+func logPrintf(format string, args ...interface{}) {
+	_, _ = fmt.Fprintf(logWriter, format, args...)
 }
 
 func readLine(r *bufio.Reader) (string, error) {

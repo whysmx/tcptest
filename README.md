@@ -13,7 +13,7 @@
 
 ## 运行环境
 
-- Go 1.21+（本地运行/编译）
+- Go 1.20+（本地运行/编译，兼容 Windows Server 2008 R2）
 - Windows 产物通过 GitHub Actions 自动构建
 
 ## 本地运行
@@ -54,6 +54,13 @@ go build -o tcptest .
 ```
 
 按 `Ctrl+C` 退出。
+
+## 日志
+
+启动后会在当前目录生成日志文件，报文与错误会同时写入日志和控制台，文件名示例：
+
+- `tcptest-client-20260206-123456.log`
+- `tcptest-server-20260206-123456.log`
 
 ## GitHub Actions 自动打包
 
