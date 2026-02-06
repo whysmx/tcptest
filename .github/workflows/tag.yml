@@ -1,0 +1,52 @@
+name: auto-tag
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create next tag
+        run: |
+          set -euo pipefail
+          git fetch --tags
+
+          if git tag --points-at HEAD | grep -qE '^v[0-9]+'; then
+            echo "HEAD already has a version tag, skip."
+            exit 0
+          fi
+
+          latest=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -z "$latest" ]; then
+            next="v1.0.0"
+          else
+            ver=${latest#v}
+            IFS='.' read -r major minor patch <<<"$ver"
+            if [ -z "${major:-}" ] || [ -z "${minor:-}" ] || [ -z "${patch:-}" ]; then
+              echo "Latest tag is not semver: $latest" >&2
+              exit 1
+            fi
+            patch=$((patch+1))
+            next="v$major.$minor.$patch"
+          fi
+
+          while git rev-parse -q --verify "refs/tags/$next" >/dev/null; do
+            ver=${next#v}
+            IFS='.' read -r major minor patch <<<"$ver"
+            patch=$((patch+1))
+            next="v$major.$minor.$patch"
+          done
+
+          echo "Creating tag: $next"
+          git tag "$next"
+          git push origin "$next"

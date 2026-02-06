@@ -61,9 +61,15 @@ go build -o tcptest .
 - 推送 tag（如 `v1.0.0`）：
   - 自动构建 Windows 版本
   - 自动创建 GitHub Release
-  - 上传 `tcptest-<tag>-windows-amd64.exe` 到 Release
+  - 上传 `tcptest-<tag>.exe` 到 Release
 
-创建 tag 示例：
+## 自动版本号（main 分支）
+
+推送到 `main` 时会自动创建 tag（默认补丁版本递增）：
+- 如果仓库没有任何 tag，会创建 `v1.0.0`
+- 之后每次 push 到 `main`，自动递增为 `v1.0.1`、`v1.0.2` ...
+
+创建 tag 示例（可选，若你想手动指定版本）：
 
 ```bash
 git tag v1.0.0
@@ -76,7 +82,9 @@ git push origin v1.0.0
 .
 ├── main.go
 ├── go.mod
-└── .github/workflows/build.yml
+└── .github/workflows
+    ├── build.yml
+    └── tag.yml
 ```
 
 ## 许可
