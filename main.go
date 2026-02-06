@@ -93,15 +93,6 @@ func runClient(reader *bufio.Reader) {
 		addr = net.JoinHostPort(ip, port)
 	}
 
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		logPrintf("连接失败: %v\n", err)
-		return
-	}
-	defer conn.Close()
-
-	logPrintf("已连接到 %s\n", addr)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -118,49 +109,42 @@ func runClient(reader *bufio.Reader) {
 	var sendCount uint64
 	var recvCount uint64
 
-	go func() {
-		buf := bufio.NewReader(conn)
-		for {
-			line, err := buf.ReadString('\n')
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					logPrintf("读取失败: %v\n", err)
-				}
-				cancel()
-				return
-			}
-			count := atomic.AddUint64(&recvCount, 1)
-			logPrintf("接收 #%d: %s", count, line)
-		}
-	}()
-
-	send := func() bool {
-		msg := time.Now().Format(time.RFC3339Nano)
-		_, err := fmt.Fprintf(conn, "%s\n", msg)
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				logPrintf("发送失败: %v\n", err)
-			}
-			cancel()
-			return false
-		}
-		count := atomic.AddUint64(&sendCount, 1)
-		logPrintf("发送 #%d: %s\n", count, msg)
-		return true
-	}
-
-	send()
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		case <-ticker.C:
-			if !send() {
+		}
+
+		logPrintf("尝试连接 %s ...\n", addr)
+		conn, err := dialTCP(ctx, addr)
+		if err != nil {
+			logErrorDetail("连接失败", err)
+			if !sleepWithContext(ctx, 3*time.Second) {
 				return
 			}
+			continue
+		}
+
+		logPrintf("已连接到 %s，本地地址 %s\n", addr, conn.LocalAddr().String())
+		err = clientSession(ctx, conn, &sendCount, &recvCount)
+		_ = conn.Close()
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				logPrintln("服务端已断开连接")
+			} else {
+				logErrorDetail("连接中断", err)
+			}
+		} else {
+			logPrintln("连接已结束")
+		}
+
+		logPrintln("3 秒后自动重连...")
+		if !sleepWithContext(ctx, 3*time.Second) {
+			return
 		}
 	}
 }
@@ -258,6 +242,94 @@ func handleConn(conn net.Conn, sendCount, recvCount *uint64) {
 		}
 		send := atomic.AddUint64(sendCount, 1)
 		logPrintf("[%s] 发送 #%d: %s\n", remote, send, msg)
+	}
+}
+
+func clientSession(ctx context.Context, conn net.Conn, sendCount, recvCount *uint64) error {
+	errCh := make(chan error, 1)
+
+	go func() {
+		buf := bufio.NewReader(conn)
+		for {
+			line, err := buf.ReadString('\n')
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			count := atomic.AddUint64(recvCount, 1)
+			logPrintf("接收 #%d: %s", count, line)
+		}
+	}()
+
+	send := func() error {
+		msg := time.Now().Format(time.RFC3339Nano)
+		_, err := fmt.Fprintf(conn, "%s\n", msg)
+		if err != nil {
+			return err
+		}
+		count := atomic.AddUint64(sendCount, 1)
+		logPrintf("发送 #%d: %s\n", count, msg)
+		return nil
+	}
+
+	if err := send(); err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errCh:
+			return err
+		case <-ticker.C:
+			if err := send(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func dialTCP(ctx context.Context, addr string) (net.Conn, error) {
+	dialer := net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 5 * time.Second,
+	}
+	return dialer.DialContext(ctx, "tcp", addr)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func logErrorDetail(prefix string, err error) {
+	logPrintf("%s: %v\n", prefix, err)
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		logPrintf("  详细: op=%s net=%s addr=%v timeout=%v temporary=%v\n",
+			opErr.Op, opErr.Net, opErr.Addr, opErr.Timeout(), opErr.Temporary())
+		if opErr.Err != nil {
+			logPrintf("  原因: %v\n", opErr.Err)
+		}
+	}
+
+	var sysErr *os.SyscallError
+	if errors.As(err, &sysErr) {
+		logPrintf("  系统: syscall=%s errno=%v\n", sysErr.Syscall, sysErr.Err)
 	}
 }
 
