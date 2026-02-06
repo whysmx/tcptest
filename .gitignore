@@ -1,0 +1,6 @@
+# Binaries
+*.exe
+*.out
+
+# Local builds
+tcptest
