@@ -50,3 +50,16 @@ jobs:
           echo "Creating tag: $next"
           git tag "$next"
           git push origin "$next"
+          echo "TAG=$next" >> "$GITHUB_ENV"
+
+      - name: Dispatch build workflow for tag
+        if: env.TAG != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/dispatches" \
+            -d "{\"ref\":\"${TAG}\"}"
