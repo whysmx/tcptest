@@ -26,7 +26,7 @@ jobs:
           $name = "tcptest"
           $version = "${{ github.ref_name }}"
           if ($version -eq "") { $version = "dev" }
-          $outfile = "$name-$version-windows-amd64.exe"
+          $outfile = "$name-$version.exe"
           go build -o $outfile .
           echo "OUTFILE=$outfile" >> $env:GITHUB_ENV
 
