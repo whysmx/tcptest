@@ -103,7 +103,6 @@ func runClient(reader *bufio.Reader) {
 		<-sigCh
 		logPrintln("\n收到信号，正在关闭客户端...")
 		cancel()
-		_ = conn.Close()
 	}()
 
 	var sendCount uint64
